@@ -1,4 +1,3 @@
-```python
 # ============================================================
 # SINGLE-STAGE METAL SOLVENT EXTRACTION SIMULATOR
 # Streamlit application
