@@ -926,4 +926,3 @@ st.caption(
     "for development and should be replaced by validated "
     "literature data before quantitative use."
 )
-```
