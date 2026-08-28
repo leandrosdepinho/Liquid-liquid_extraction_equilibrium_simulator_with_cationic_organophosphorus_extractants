@@ -23,25 +23,6 @@ st.set_page_config(
 # ============================================================
 # METAL DATABASE
 # ============================================================
-#
-# Kex values are provisional and intentionally editable.
-# They represent a qualitative/approximate database for
-# monoprotonic acidic organophosphorus extractants.
-#
-# The equilibrium reaction is represented as:
-#
-#     M(aq) + n HR(org) <=> MR_n(org) + n H+(aq)
-#
-# with n = 1 for this simplified model.
-#
-# Kex is therefore used as:
-#
-#     D = Kex * [E_free] / [H+]
-#
-# The important point is that E_free is NOT fixed.
-# It is solved from the GLOBAL extractant mass balance,
-# meaning all metals compete for the same extractant pool.
-# ============================================================
 
 METALS = [
     "La", "Ce", "Pr", "Nd", "Sm",
@@ -85,15 +66,6 @@ MOLAR_MASS = {
 # ============================================================
 # PROVISIONAL Kex DATABASE
 # ============================================================
-#
-# Values are deliberately approximate placeholders.
-# Replace these with literature values later.
-#
-# The relative trends are chemically plausible:
-# acidic organophosphorus extractants generally show
-# stronger extraction toward more strongly extracted metals,
-# while pH strongly controls extraction.
-# ============================================================
 
 KEX_DATABASE = {
 
@@ -126,7 +98,6 @@ KEX_DATABASE = {
         "Al": 5.0e-2
     },
 
-
     "P507": {
 
         "La": 8.0e-4,
@@ -155,7 +126,6 @@ KEX_DATABASE = {
         "Mg": 1.5e-4,
         "Al": 4.0e-2
     },
-
 
     "Cyanex": {
 
@@ -224,46 +194,9 @@ def solve_competitive_extraction(
     h_initial,
     extractant_total,
     saponification_fraction,
-    ao_ratio,
+    oa_ratio,
     kex_values
 ):
-    """
-    Solve one complete multicomponent equilibrium.
-
-    Every metal is present simultaneously.
-
-    The free extractant concentration is solved globally
-    from the total extractant balance.
-
-    O/A is explicitly included:
-
-        C_org = D * C_aq
-
-    and, for concentration in the aqueous phase:
-
-        C_aq =
-            C_feed /
-            (1 + D * O/A)
-
-    The extracted amount consumes extractant.
-
-    For the monoprotonic acidic extractant model:
-
-        M + E <=> ME + H+
-
-    one mole of extractant is consumed per mole of
-    extracted metal.
-
-    Saponification provides a finite reservoir that
-    neutralizes generated H+.
-
-    The solver simultaneously finds:
-
-        H+
-        free extractant
-
-    while all metal balances are satisfied.
-    """
 
     feed = np.asarray(
         feed,
@@ -276,7 +209,7 @@ def solve_competitive_extraction(
     )
 
     oa = max(
-        float(ao_ratio),
+        float(oa_ratio),
         1e-12
     )
 
@@ -290,10 +223,6 @@ def solve_competitive_extraction(
         * saponification_fraction
     )
 
-    # --------------------------------------------------------
-    # Initial guesses
-    # --------------------------------------------------------
-
     h_guess = max(
         h_initial,
         1e-10
@@ -303,10 +232,6 @@ def solve_competitive_extraction(
         extractant_total * 0.5,
         1e-10
     )
-
-    # --------------------------------------------------------
-    # Residual equations
-    # --------------------------------------------------------
 
     def residual(log_variables):
 
@@ -318,17 +243,12 @@ def solve_competitive_extraction(
             log_variables[1]
         )
 
-        # Distribution coefficients
         D = (
             kex_values
             * e_free
             / h
         )
 
-        # A/O equilibrium
-        #
-        # C_org / C_aq = D * O/A
-        #
         caq = (
             feed
             /
@@ -348,19 +268,11 @@ def solve_competitive_extraction(
             corg
         )
 
-        # ----------------------------------------------------
-        # Global extractant balance
-        # ----------------------------------------------------
-
         e_expected = max(
             1e-12,
             extractant_total
             - extracted
         )
-
-        # ----------------------------------------------------
-        # H+ generation
-        # ----------------------------------------------------
 
         h_generated = extracted
 
@@ -375,7 +287,6 @@ def solve_competitive_extraction(
             - neutralized
         )
 
-        # Numerical scaling
         scale_e = max(
             extractant_total,
             1e-8
@@ -400,10 +311,6 @@ def solve_competitive_extraction(
 
         ])
 
-    # --------------------------------------------------------
-    # Solve
-    # --------------------------------------------------------
-
     result = least_squares(
         residual,
         np.log([
@@ -423,10 +330,6 @@ def solve_competitive_extraction(
     e_free = np.exp(
         result.x[1]
     )
-
-    # --------------------------------------------------------
-    # Final equilibrium
-    # --------------------------------------------------------
 
     D = (
         kex_values
@@ -517,7 +420,7 @@ def solve_competitive_extraction(
 
 
 # ============================================================
-# GRAPH GENERATION
+# GRAPH FUNCTIONS
 # ============================================================
 
 def make_parameter_range(
@@ -558,24 +461,25 @@ def calculate_sweep(
     parameter,
     values,
     feed,
-    h_initial,
+    pH,
     extractant_total,
     saponification,
-    ao_ratio,
-    kex_values
+    oa_ratio,
+    kex_values,
+    selected_metals
 ):
 
     results = {
         metal: []
-        for metal in selected_metals_global
+        for metal in selected_metals
     }
 
     for value in values:
 
-        current_pH = h_initial
+        current_pH = pH
         current_extractant = extractant_total
         current_saponification = saponification
-        current_ao = ao_ratio
+        current_ao = oa_ratio
 
         if parameter == "pH":
 
@@ -589,7 +493,7 @@ def calculate_sweep(
 
             current_saponification = value
 
-        elif parameter == "A/O":
+        elif parameter == "O/A":
 
             current_ao = value
 
@@ -609,9 +513,7 @@ def calculate_sweep(
 
         )
 
-        for i, metal in enumerate(
-            selected_metals_global
-        ):
+        for metal in selected_metals:
 
             metal_index = (
                 METALS.index(metal)
@@ -630,7 +532,8 @@ def plot_sweep(
     x,
     results,
     xlabel,
-    title
+    title,
+    fixed_text
 ):
 
     fig, ax = plt.subplots(
@@ -658,6 +561,20 @@ def plot_sweep(
 
     ax.set_title(
         title
+    )
+
+    ax.text(
+        0.02,
+        0.03,
+        fixed_text,
+        transform=ax.transAxes,
+        fontsize=9,
+        verticalalignment="bottom",
+        bbox=dict(
+            boxstyle="round",
+            facecolor="white",
+            alpha=0.8
+        )
     )
 
     ax.set_ylim(
@@ -706,7 +623,7 @@ st.header(
     "1. Solution composition"
 )
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 with col1:
 
@@ -721,20 +638,11 @@ with col1:
 
 with col2:
 
-    initial_pH = st.number_input(
-        "Initial pH",
+    pH = st.number_input(
+        "Operating pH",
         min_value=-2.0,
         max_value=14.0,
         value=2.0,
-        step=0.1
-    )
-
-with col3:
-
-    oa_ratio = st.number_input(
-        "O/A ratio",
-        min_value=0.001,
-        value=1.0,
         step=0.1
     )
 
@@ -747,19 +655,17 @@ st.subheader(
     "Select metals"
 )
 
-selected_metals_global = st.multiselect(
+selected_metals = st.multiselect(
     "Metals present in the aqueous solution",
     METALS,
     default=["Nd", "Sm", "Fe"]
 )
 
-
 feed = np.zeros(
     len(METALS)
 )
 
-
-if selected_metals_global:
+if selected_metals:
 
     st.subheader(
         "Metal concentrations"
@@ -768,7 +674,7 @@ if selected_metals_global:
     cols = st.columns(4)
 
     for i, metal in enumerate(
-        selected_metals_global
+        selected_metals
     ):
 
         with cols[i % 4]:
@@ -847,6 +753,22 @@ saponification_fraction = (
 
 
 # ============================================================
+# O/A
+# ============================================================
+
+st.header(
+    "3. Phase ratio"
+)
+
+oa_ratio = st.number_input(
+    "O/A ratio",
+    min_value=0.001,
+    value=1.0,
+    step=0.1
+)
+
+
+# ============================================================
 # DATABASE INFORMATION
 # ============================================================
 
@@ -856,7 +778,7 @@ with st.expander(
 
     kex_table = []
 
-    for metal in selected_metals_global:
+    for metal in selected_metals:
 
         kex_table.append({
 
@@ -883,7 +805,7 @@ with st.expander(
 
 
 # ============================================================
-# SOLVE BASE CASE
+# KEX ARRAY
 # ============================================================
 
 kex_values = np.array([
@@ -900,161 +822,251 @@ kex_values = np.array([
 ])
 
 
-if st.button(
-    "Calculate extraction curves",
-    type="primary"
-):
+# ============================================================
+# GRAPH SETTINGS
+# ============================================================
 
-    st.session_state[
-        "calculate_curves"
-    ] = True
+st.header(
+    "4. Graph settings"
+)
 
-
-if st.session_state.get(
-    "calculate_curves",
-    False
-):
-
-    st.header(
-        "3. Extraction curves"
-    )
-
-    # --------------------------------------------------------
-    # pH
-    # --------------------------------------------------------
-
-    pH_values = np.linspace(
-        max(
-            -1,
-            initial_pH - 3
-        ),
-        min(
-            14,
-            initial_pH + 3
-        ),
-        60
-    )
-
-    pH_results = calculate_sweep(
-        "pH",
-        pH_values,
-        feed,
-        initial_pH,
-        extractant_total,
-        saponification_fraction,
-        oa_ratio,
-        kex_values
-    )
-
-    st.pyplot(
-        plot_sweep(
-            pH_values,
-            pH_results,
-            "pH",
-            "Extraction vs. pH"
-        ),
-        clear_figure=True
-    )
-
-
-    # --------------------------------------------------------
-    # O/A
-    # --------------------------------------------------------
-
-    ao_values = make_parameter_range(
-        oa_ratio,
-        0.01,
-        100.0
-    )
-
-    ao_results = calculate_sweep(
-        "A/O",
-        ao_values,
-        feed,
-        initial_pH,
-        extractant_total,
-        saponification_fraction,
-        oa_ratio,
-        kex_values
-    )
-
-    st.pyplot(
-        plot_sweep(
-            ao_values,
-            ao_results,
-            "O/A ratio",
-            "Extraction vs. O/A ratio"
-        ),
-        clear_figure=True
-    )
-
-
-    # --------------------------------------------------------
-    # EXTRACTANT
-    # --------------------------------------------------------
-
-    extractant_values = make_parameter_range(
-        extractant_total,
-        1e-4,
-        10.0
-    )
-
-    extractant_results = calculate_sweep(
-        "Extractant",
-        extractant_values,
-        feed,
-        initial_pH,
-        extractant_total,
-        saponification_fraction,
-        oa_ratio,
-        kex_values
-    )
-
-    st.pyplot(
-        plot_sweep(
-            extractant_values,
-            extractant_results,
-            "Total extractant concentration (mol/L)",
-            "Extraction vs. extractant concentration"
-        ),
-        clear_figure=True
-    )
-
-
-    # --------------------------------------------------------
-    # SAPONIFICATION
-    # --------------------------------------------------------
-
-    sap_values = np.linspace(
-        0,
-        100,
-        60
-    )
-
-    sap_results = calculate_sweep(
-        "Saponification",
-        sap_values,
-        feed,
-        initial_pH,
-        extractant_total,
-        saponification_fraction,
-        oa_ratio,
-        kex_values
-    )
-
-    st.pyplot(
-        plot_sweep(
-            sap_values,
-            sap_results,
-            "Saponification (%)",
-            "Extraction vs. saponification"
-        ),
-        clear_figure=True
-    )
+st.write(
+    "For each graph, choose the variable to study. "
+    "All other operating conditions remain fixed at "
+    "the values selected above."
+)
 
 
 # ============================================================
-# BASE CASE RESULT
+# pH GRAPH
+# ============================================================
+
+st.subheader(
+    "Extraction vs. pH"
+)
+
+pH_min = st.number_input(
+    "Minimum pH",
+    min_value=-2.0,
+    max_value=14.0,
+    value=0.0,
+    step=0.5,
+    key="pH_min"
+)
+
+pH_max = st.number_input(
+    "Maximum pH",
+    min_value=-2.0,
+    max_value=14.0,
+    value=6.0,
+    step=0.5,
+    key="pH_max"
+)
+
+pH_values = np.linspace(
+    min(pH_min, pH_max),
+    max(pH_min, pH_max),
+    60
+)
+
+pH_results = calculate_sweep(
+    "pH",
+    pH_values,
+    feed,
+    pH,
+    extractant_total,
+    saponification_fraction,
+    oa_ratio,
+    kex_values,
+    selected_metals
+)
+
+st.pyplot(
+    plot_sweep(
+        pH_values,
+        pH_results,
+        "pH",
+        "Extraction vs. pH",
+        (
+            f"Fixed: {extractant_type} | "
+            f"Extractant = {extractant_total:.4g} M | "
+            f"O/A = {oa_ratio:.4g} | "
+            f"Saponification = {saponification_percent:.1f}%"
+        )
+    ),
+    clear_figure=True
+)
+
+
+# ============================================================
+# O/A GRAPH
+# ============================================================
+
+st.subheader(
+    "Extraction vs. O/A ratio"
+)
+
+ao_min = st.number_input(
+    "Minimum O/A",
+    min_value=0.001,
+    value=0.1,
+    step=0.1,
+    key="ao_min"
+)
+
+ao_max = st.number_input(
+    "Maximum O/A",
+    min_value=0.001,
+    value=10.0,
+    step=0.5,
+    key="ao_max"
+)
+
+ao_values = np.geomspace(
+    min(ao_min, ao_max),
+    max(ao_min, ao_max),
+    60
+)
+
+ao_results = calculate_sweep(
+    "O/A",
+    ao_values,
+    feed,
+    pH,
+    extractant_total,
+    saponification_fraction,
+    oa_ratio,
+    kex_values,
+    selected_metals
+)
+
+st.pyplot(
+    plot_sweep(
+        ao_values,
+        ao_results,
+        "O/A ratio",
+        "Extraction vs. O/A ratio",
+        (
+            f"Fixed: pH = {pH:.2f} | "
+            f"{extractant_type} | "
+            f"Extractant = {extractant_total:.4g} M | "
+            f"Saponification = {saponification_percent:.1f}%"
+        )
+    ),
+    clear_figure=True
+)
+
+
+# ============================================================
+# EXTRACTANT GRAPH
+# ============================================================
+
+st.subheader(
+    "Extraction vs. extractant concentration"
+)
+
+extractant_min = st.number_input(
+    "Minimum extractant concentration (mol/L)",
+    min_value=0.000001,
+    value=0.01,
+    step=0.01,
+    key="extractant_min"
+)
+
+extractant_max = st.number_input(
+    "Maximum extractant concentration (mol/L)",
+    min_value=0.000001,
+    value=2.0,
+    step=0.1,
+    key="extractant_max"
+)
+
+extractant_values = np.geomspace(
+    min(
+        extractant_min,
+        extractant_max
+    ),
+    max(
+        extractant_min,
+        extractant_max
+    ),
+    60
+)
+
+extractant_results = calculate_sweep(
+    "Extractant",
+    extractant_values,
+    feed,
+    pH,
+    extractant_total,
+    saponification_fraction,
+    oa_ratio,
+    kex_values,
+    selected_metals
+)
+
+st.pyplot(
+    plot_sweep(
+        extractant_values,
+        extractant_results,
+        "Extractant concentration (mol/L, monomer basis)",
+        "Extraction vs. extractant concentration",
+        (
+            f"Fixed: pH = {pH:.2f} | "
+            f"{extractant_type} | "
+            f"O/A = {oa_ratio:.4g} | "
+            f"Saponification = {saponification_percent:.1f}%"
+        )
+    ),
+    clear_figure=True
+)
+
+
+# ============================================================
+# SAPONIFICATION GRAPH
+# ============================================================
+
+st.subheader(
+    "Extraction vs. saponification"
+)
+
+sap_values = np.linspace(
+    0,
+    100,
+    60
+)
+
+sap_results = calculate_sweep(
+    "Saponification",
+    sap_values,
+    feed,
+    pH,
+    extractant_total,
+    saponification_fraction,
+    oa_ratio,
+    kex_values,
+    selected_metals
+)
+
+st.pyplot(
+    plot_sweep(
+        sap_values,
+        sap_results,
+        "Saponification (%)",
+        "Extraction vs. saponification",
+        (
+            f"Fixed: pH = {pH:.2f} | "
+            f"{extractant_type} | "
+            f"Extractant = {extractant_total:.4g} M | "
+            f"O/A = {oa_ratio:.4g}"
+        )
+    ),
+    clear_figure=True
+)
+
+
+# ============================================================
+# CURRENT OPERATING POINT
 # ============================================================
 
 st.header(
@@ -1065,7 +1077,7 @@ base_result = solve_competitive_extraction(
 
     feed,
 
-    10 ** (-initial_pH),
+    10 ** (-pH),
 
     extractant_total,
 
@@ -1080,7 +1092,7 @@ base_result = solve_competitive_extraction(
 
 summary = []
 
-for metal in selected_metals_global:
+for metal in selected_metals:
 
     i = METALS.index(
         metal
