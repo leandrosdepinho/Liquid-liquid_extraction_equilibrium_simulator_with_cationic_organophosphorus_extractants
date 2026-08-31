@@ -70,6 +70,7 @@ MOLAR_MASS = {
 # ============================================================
 # PROVISIONAL Kex DATABASE
 # Note: Kex values are typically reported for M³⁺ + 3HA ↔ MA₃ + 3H⁺
+# These Kex values are kept as in the original provisional table.
 # ============================================================
 
 KEX_DATABASE = {
@@ -201,33 +202,40 @@ def solve_competitive_extraction(
     saponification_fraction,
     oa_ratio,
     kex_values,
-    metal_charges
+    metal_charges,
+    aggregation=2
 ):
     """
     Solve single-stage multicomponent equilibrium extraction.
-    
-    CORRECTED MODEL:
+
+    MODEL ASSUMPTIONS / IMPLEMENTATION NOTES
     - Stoichiometry: M^z+ + z*HA ↔ MA_z + z*H+
-    - Saponification: consumes free extractant from the pool
-    - H+ generation: z moles per mole metal extracted
-    
+    - extractant_total is provided in monomeric basis (mol of HA per L_org)
+    - aggregation: number of monomers per associated extractant species (2 for dimer)
+      The code keeps mass balances in monomeric units, but makes the aggregation explicit
+      so the implementation and comments match the chemical picture.
+    - Saponification_fraction is a fraction in [0,1].
+    - Activities, ionic strength and metal hydrolysis are neglected.
+
     Parameters
     ----------
     feed : array
-        Initial metal concentrations (mol/L)
+        Initial metal concentrations (mol/L, aqueous)
     h_initial : float
-        Initial H+ concentration (mol/L)
+        Initial H+ concentration (mol/L, aqueous)
     extractant_total : float
-        Total extractant concentration (mol/L, monomeric basis)
+        Total extractant concentration (mol/L, monomeric basis, per L_org)
     saponification_fraction : float
         Fraction of extractant that is saponified [0, 1]
     oa_ratio : float
-        Organic to aqueous phase ratio
+        Organic to aqueous phase ratio (V_org / V_aq)
     kex_values : array
         Kex for each metal (basis: M^z+ + z*HA ↔ MA_z + z*H+)
     metal_charges : array
         Charge of each metal (z value)
-    
+    aggregation : int
+        Number of monomers per associated extractant unit (2 for dimer)
+
     Returns
     -------
     dict
@@ -241,57 +249,67 @@ def solve_competitive_extraction(
     oa = max(float(oa_ratio), 1e-12)
     extractant_total = max(float(extractant_total), 1e-12)
 
-    # Saponified extractant is removed from the free pool
+    # enforce saponification fraction bounds
+    saponification_fraction = float(saponification_fraction)
+    saponification_fraction = np.clip(saponification_fraction, 0.0, 1.0)
+
+    # Saponified extractant is removed from the free pool (monomeric basis, per L_org)
     sap_capacity = extractant_total * saponification_fraction
 
+    # initial guesses (in monomeric basis for extractant)
     h_guess = max(h_initial, 1e-10)
-    e_guess = max(extractant_total * 0.5, 1e-10)
+    e_guess = max(extractant_total * 0.5, 1e-12)
 
     def residual(log_variables):
         """
         Residual equations for equilibrium:
         1. Extractant balance: e_free = extractant_total - extracted - saponified
-        2. H+ balance: h = h_initial + h_produced - h_neutralized
+        2. H+ balance: h = h_initial + h_produced
+        All concentrations are on per-Laq basis unless noted. Extractant and organic
+        phase concentrations are expressed per L_org; conversions are done where needed.
         """
 
         h = np.exp(log_variables[0])
-        e_free = np.exp(log_variables[1])
+        e_free = np.exp(log_variables[1])  # monomer basis (mol HA / L_org)
 
-        # Distribution coefficient: Kex = [MA_z]_org * [H+]^z / [M^z+]_aq / [HA]_org^z
-        # For dilute solutions: D_i = Kex_i * e_free^z_i / h^z_i
-        D = kex_values * (e_free ** metal_charges) / (h ** metal_charges)
+        # Effective HA monomer concentration used by Kex (monomeric basis)
+        # If extractant associates (dimerizes), the monomer concentration equals
+        # aggregation * [assoc_species]. We keep using monomeric basis, so no change
+        # in the Kex formula is required as long as Kex values are given consistently.
+        ha_monomer = e_free
 
-        # Aqueous concentrations at equilibrium
+        # Distribution coefficient: Kex = [MA_z]_org * [H+]^z / ([M^z+]_aq * [HA]_org^z)
+        # For dilute solutions: D_i = Kex_i * [HA]^z / [H+]^z
+        D = kex_values * (ha_monomer ** metal_charges) / (h ** metal_charges)
+
+        # Aqueous concentrations at equilibrium (per L_aq)
         caq = feed / (1.0 + D * oa)
 
-        # Organic concentrations at equilibrium
-        corg = D * oa * caq
+        # Organic concentrations at equilibrium (expressed per L_aq)
+        # corg_aq = D * oa * caq  (mol of metal in organic phase per L_aq)
+        corg_aq = D * oa * caq
 
-        # Total metal extracted (sum of all metals in organic phase)
-        extracted_total_conc = np.sum(corg)
+        # Convert organic metal concentration to per L_org for mass balances involving
+        # extractant (extractant_total is per L_org)
+        corg_org = corg_aq / oa
 
-        # Extractant consumed: z moles of HA per mole of metal
-        # For M³⁺: extractant_consumed = 3 * sum(corg)
+        # Extractant consumed: z moles of HA (monomer units) per mole of metal extracted
         extractant_consumed = np.sum(
-            metal_charges[feed > 0] * corg[feed > 0]
+            metal_charges[feed > 0] * corg_org[feed > 0]
         )
 
-        # Saponified extractant is already accounted for in sap_capacity
+        # Expected free extractant (monomer basis, per L_org)
         e_expected = max(
             1e-12,
             extractant_total - extractant_consumed - sap_capacity
         )
 
-        # H+ generation: z moles per mole of metal
-        # For M³⁺: h_produced = 3 * sum(corg)
+        # H+ generation: z moles per mole of metal (produced in aqueous phase per L_aq)
         h_produced = np.sum(
-            metal_charges[feed > 0] * corg[feed > 0]
+            metal_charges[feed > 0] * corg_aq[feed > 0]
         )
 
-        # H+ balance:
-        # Initial H+ + generated H+ - neutralized by saponification
-        # Note: Saponification consumes HA (extractant), not H+ directly
-        # But it reduces the amount of extractant available, which indirectly affects pH
+        # H+ balance: initial + produced (we're not modelling neutralization by base here)
         h_expected = h_initial + h_produced
 
         # Scaling for numerical stability
@@ -317,31 +335,39 @@ def solve_competitive_extraction(
     e_free = np.exp(result.x[1])
 
     # Recalculate at convergence
-    D = kex_values * (e_free ** metal_charges) / (h ** metal_charges)
+    ha_monomer = e_free
+    D = kex_values * (ha_monomer ** metal_charges) / (h ** metal_charges)
 
     caq = feed / (1.0 + D * oa)
-    corg = D * oa * caq
+    corg_aq = D * oa * caq
+    corg_org = corg_aq / oa
 
     # Extraction percentage (only for metals present in feed)
     extraction = np.divide(
-        corg,
+        corg_aq,
         feed,
-        out=np.zeros_like(corg),
+        out=np.zeros_like(corg_aq),
         where=feed > 0
     ) * 100.0
 
     extraction = np.clip(extraction, 0.0, 100.0)
 
-    extracted_total = np.sum(corg)
+    extracted_total = np.sum(corg_aq)
     extractant_consumed = np.sum(
-        metal_charges[feed > 0] * corg[feed > 0]
+        metal_charges[feed > 0] * corg_org[feed > 0]
     )
 
     h_produced = np.sum(
-        metal_charges[feed > 0] * corg[feed > 0]
+        metal_charges[feed > 0] * corg_aq[feed > 0]
     )
 
-    sap_remaining = max(0.0, sap_capacity - 0)  # Saponified extractant is gone
+    sap_remaining = max(0.0, sap_capacity - 0)  # Saponified extractant is considered lost
+
+    # Basic consistency checks (not raising errors, but returned for inspection)
+    consistency = {
+        "extractant_consumed_le_total": extractant_consumed <= (extractant_total + 1e-8),
+        "free_extractant_nonnegative": e_free >= 0,
+    }
 
     return {
         "h": h,
@@ -349,19 +375,21 @@ def solve_competitive_extraction(
         "free_extractant": e_free,
         "D": D,
         "caq": caq,
-        "corg": corg,
+        "corg": corg_aq,
         "extraction": extraction,
         "extracted_total": extracted_total,
         "extractant_consumed": extractant_consumed,
         "h_produced": h_produced,
         "sap_remaining": sap_remaining,
-        "success": result.success
+        "success": result.success,
+        "consistency": consistency
     }
 
 
 # ============================================================
 # GRAPH FUNCTIONS
 # ============================================================
+
 
 def make_parameter_range(center, minimum, maximum, points=60):
     """Create logarithmic parameter range around center value"""
@@ -402,7 +430,9 @@ def calculate_sweep(
         elif parameter == "Extractant":
             current_extractant = value
         elif parameter == "Saponification":
-            current_saponification = value
+            # input values for saponification may be given as percent (0-100)
+            # convert to fraction in [0,1]
+            current_saponification = float(value) / 100.0
         elif parameter == "O/A":
             current_oa = value
 
@@ -618,7 +648,8 @@ with st.expander("View provisional Kex values and stoichiometry"):
     st.caption(
         "**Corrected Kex definition**: Kex = [MA_z]_org·[H+]^z / ([M^z+]_aq·[HA]_org^z)\n\n"
         "The stoichiometry is M^z+ + z·HA ↔ MA_z + z·H+, where z is the metal charge.\n"
-        "Saponification removes extractant from the free pool, reducing extraction capacity."
+        "Saponification removes extractant from the free pool, reducing extraction capacity.\n"
+        "ASSUMPTIONS: extractant provided in monomeric basis; extractant associates (dimer) in the organic phase but mass balances are done in monomeric units."
     )
 
 
@@ -831,7 +862,7 @@ st.pyplot(
 
 st.subheader("Extraction vs. saponification")
 
-sap_values = np.linspace(0, 100, 60)
+sap_values = np.linspace(0, 100, 60)  # percent values passed; calculate_sweep converts to fraction
 
 sap_results = calculate_sweep(
     "Saponification",
