@@ -1,14 +1,3 @@
-# ============================================================
-# COMPETITIVE SOLVENT EXTRACTION SIMULATOR (CORRECTED)
-# Single-stage multicomponent equilibrium
-# 
-# IMPORTANT CORRECTIONS:
-# 1. Stoichiometry: M³⁺ + 3HA ↔ MA₃ + 3H⁺ (not 1:1)
-# 2. Saponification: consumes free extractant (HA), not H⁺
-# 3. H⁺ generation: 3 moles per mole metal extracted
-# 4. Extractant balance: accounts for 1:3 stoichiometry
-# ============================================================
-
 import streamlit as st
 import numpy as np
 import matplotlib.pyplot as plt
