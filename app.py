@@ -69,8 +69,26 @@ MOLAR_MASS = {
 
 # ============================================================
 # PROVISIONAL Kex DATABASE
-# Note: Kex values are typically reported for M³⁺ + 3HA ↔ MA₃ + 3H⁺
-# These Kex values are kept as in the original provisional table.
+# Note: Kex values are apparent/conditional constants reported on a
+# formal-monomer basis for the reaction M^z+ + z*HA <-> MA_z + z*H+
+# (see solve_competitive_extraction docstring for why this convention
+# was chosen). These are illustrative/provisional numbers, NOT fitted
+# to a specific literature dataset -- they are meant for screening-tool
+# demonstration only.
+#
+# CORRECTION (chemistry error fixed here): for Cyanex 272, Co was
+# previously given a LOWER Kex than Ni (Co=2.5e-3 < Ni=4.0e-3). This
+# contradicts one of the best-documented facts in hydrometallurgy:
+# Cyanex 272 is industrially used specifically because it extracts
+# Co(II) far more readily than Ni(II) (this Co/Ni selectivity is the
+# entire reason the reagent was developed and is used in Co/Ni
+# separation flowsheets). The Co value below was raised so that
+# Co >> Ni for Cyanex 272, consistent with that fact. This is still a
+# provisional illustrative number (the real separation factor is
+# typically much larger and pH-dependent), but the ranking is now
+# chemically correct. DEHPA/P507 were left with Co ~ Ni, which is
+# consistent with their well-known POOR Co/Ni selectivity (the reason
+# Cyanex 272 exists in the first place).
 # ============================================================
 
 KEX_DATABASE = {
@@ -152,8 +170,8 @@ KEX_DATABASE = {
         "Lu": 6.5e-1,
 
         "Fe": 2.5e-1,
-        "Co": 2.5e-3,
-        "Ni": 4.0e-3,
+        "Co": 1.0e-1,   # CORRIGIDO: era 2.5e-3 (Co < Ni), agora Co >> Ni
+        "Ni": 4.0e-3,   # mantido
         "Cu": 7.0e-2,
         "Zn": 1.5e-2,
         "Mn": 2.5e-3,
@@ -182,15 +200,6 @@ def concentration_to_mol(value, unit, metal):
     return 0.0
 
 
-def safe_percent(value):
-    """Clip percentage to [0, 100]"""
-    return np.clip(
-        value * 100.0,
-        0.0,
-        100.0
-    )
-
-
 # ============================================================
 # COMPETITIVE EQUILIBRIUM SOLVER
 # ============================================================
@@ -199,23 +208,36 @@ def solve_competitive_extraction(
     feed,
     h_initial,
     extractant_total,
-    saponification_fraction,
     oa_ratio,
     kex_values,
-    metal_charges,
-    aggregation=2
+    metal_charges
 ):
     """
     Solve single-stage multicomponent equilibrium extraction.
 
     MODEL ASSUMPTIONS / IMPLEMENTATION NOTES
-    - Stoichiometry: M^z+ + z*HA ↔ MA_z + z*H+
-    - extractant_total is provided in monomeric basis (mol of HA per L_org)
-    - aggregation: number of monomers per associated extractant species (2 for dimer)
-      The code keeps mass balances in monomeric units, but makes the aggregation explicit
-      so the implementation and comments match the chemical picture.
-    - Saponification_fraction is a fraction in [0,1].
-    - Activities, ionic strength and metal hydrolysis are neglected.
+    - Stoichiometry: M^z+ + z*HA <-> MA_z + z*H+
+    - Monomer/dimer convention (FIXED): DEHPA, P507 and Cyanex 272 all
+      dimerize in non-polar diluents in reality. Rather than modeling a
+      separate dimerization equilibrium (which would require a Kdim not
+      normally available for a pre-experimental screening tool), this
+      model follows the standard practical convention used when Kex is
+      reported/fitted as an apparent constant on a FORMAL MONOMER basis:
+      'extractant_total' and 'kex_values' are BOTH expressed per mole of
+      monomeric HA, consistently, everywhere in this function. The
+      previous version of this code carried an unused 'aggregation'
+      parameter that implied dimer/monomer bookkeeping was happening
+      when it was not -- that parameter has been removed to avoid this
+      false impression. There is exactly one convention in force now
+      (formal monomer basis), and it is used consistently in the
+      extractant mass balance, the Kex expression, and the UI labels.
+    - Saponification has been intentionally removed from this model
+      (previously represented as extractant permanently withdrawn from
+      the free pool). Modeling neutralized extractant correctly would
+      require tracking Na+/NH4+ for the neutralized fraction instead of
+      H+, which this single-stage H+-only mass balance does not attempt.
+    - Activities, ionic strength, temperature and metal hydrolysis are
+      neglected (by design, for a pre-experimental screening tool).
 
     Parameters
     ----------
@@ -224,17 +246,13 @@ def solve_competitive_extraction(
     h_initial : float
         Initial H+ concentration (mol/L, aqueous)
     extractant_total : float
-        Total extractant concentration (mol/L, monomeric basis, per L_org)
-    saponification_fraction : float
-        Fraction of extractant that is saponified [0, 1]
+        Total extractant concentration (mol/L, formal monomer basis, per L_org)
     oa_ratio : float
         Organic to aqueous phase ratio (V_org / V_aq)
     kex_values : array
-        Kex for each metal (basis: M^z+ + z*HA ↔ MA_z + z*H+)
+        Kex for each metal (basis: M^z+ + z*HA <-> MA_z + z*H+, formal monomer)
     metal_charges : array
         Charge of each metal (z value)
-    aggregation : int
-        Number of monomers per associated extractant unit (2 for dimer)
 
     Returns
     -------
@@ -249,59 +267,46 @@ def solve_competitive_extraction(
     oa = max(float(oa_ratio), 1e-12)
     extractant_total = max(float(extractant_total), 1e-12)
 
-    # enforce saponification fraction bounds
-    saponification_fraction = float(saponification_fraction)
-    saponification_fraction = np.clip(saponification_fraction, 0.0, 1.0)
-
-    # Saponified extractant is removed from the free pool (monomeric basis, per L_org)
-    sap_capacity = extractant_total * saponification_fraction
-
-    # initial guesses (in monomeric basis for extractant)
+    # initial guesses (formal monomer basis for extractant)
     h_guess = max(h_initial, 1e-10)
     e_guess = max(extractant_total * 0.5, 1e-12)
 
     def residual(log_variables):
         """
         Residual equations for equilibrium:
-        1. Extractant balance: e_free = extractant_total - extracted - saponified
+        1. Extractant balance: e_free = extractant_total - extracted
         2. H+ balance: h = h_initial + h_produced
-        All concentrations are on per-Laq basis unless noted. Extractant and organic
-        phase concentrations are expressed per L_org; conversions are done where needed.
+        All metal concentrations are on a per-L_aq basis unless noted.
+        Extractant concentrations are on a per-L_org, formal-monomer basis;
+        conversions between the two bases are done explicitly where needed.
         """
 
         h = np.exp(log_variables[0])
-        e_free = np.exp(log_variables[1])  # monomer basis (mol HA / L_org)
-
-        # Effective HA monomer concentration used by Kex (monomeric basis)
-        # If extractant associates (dimerizes), the monomer concentration equals
-        # aggregation * [assoc_species]. We keep using monomeric basis, so no change
-        # in the Kex formula is required as long as Kex values are given consistently.
-        ha_monomer = e_free
+        e_free = np.exp(log_variables[1])  # formal monomer basis (mol HA / L_org)
 
         # Distribution coefficient: Kex = [MA_z]_org * [H+]^z / ([M^z+]_aq * [HA]_org^z)
         # For dilute solutions: D_i = Kex_i * [HA]^z / [H+]^z
-        D = kex_values * (ha_monomer ** metal_charges) / (h ** metal_charges)
+        D = kex_values * (e_free ** metal_charges) / (h ** metal_charges)
 
         # Aqueous concentrations at equilibrium (per L_aq)
         caq = feed / (1.0 + D * oa)
 
         # Organic concentrations at equilibrium (expressed per L_aq)
-        # corg_aq = D * oa * caq  (mol of metal in organic phase per L_aq)
         corg_aq = D * oa * caq
 
         # Convert organic metal concentration to per L_org for mass balances involving
         # extractant (extractant_total is per L_org)
         corg_org = corg_aq / oa
 
-        # Extractant consumed: z moles of HA (monomer units) per mole of metal extracted
+        # Extractant consumed: z moles of HA (formal monomer) per mole of metal extracted
         extractant_consumed = np.sum(
             metal_charges[feed > 0] * corg_org[feed > 0]
         )
 
-        # Expected free extractant (monomer basis, per L_org)
+        # Expected free extractant (formal monomer basis, per L_org)
         e_expected = max(
             1e-12,
-            extractant_total - extractant_consumed - sap_capacity
+            extractant_total - extractant_consumed
         )
 
         # H+ generation: z moles per mole of metal (produced in aqueous phase per L_aq)
@@ -309,7 +314,7 @@ def solve_competitive_extraction(
             metal_charges[feed > 0] * corg_aq[feed > 0]
         )
 
-        # H+ balance: initial + produced (we're not modelling neutralization by base here)
+        # H+ balance: initial + produced (no external base/buffer is modelled)
         h_expected = h_initial + h_produced
 
         # Scaling for numerical stability
@@ -335,8 +340,7 @@ def solve_competitive_extraction(
     e_free = np.exp(result.x[1])
 
     # Recalculate at convergence
-    ha_monomer = e_free
-    D = kex_values * (ha_monomer ** metal_charges) / (h ** metal_charges)
+    D = kex_values * (e_free ** metal_charges) / (h ** metal_charges)
 
     caq = feed / (1.0 + D * oa)
     corg_aq = D * oa * caq
@@ -361,8 +365,6 @@ def solve_competitive_extraction(
         metal_charges[feed > 0] * corg_aq[feed > 0]
     )
 
-    sap_remaining = max(0.0, sap_capacity - 0)  # Saponified extractant is considered lost
-
     # Basic consistency checks (not raising errors, but returned for inspection)
     consistency = {
         "extractant_consumed_le_total": extractant_consumed <= (extractant_total + 1e-8),
@@ -380,7 +382,6 @@ def solve_competitive_extraction(
         "extracted_total": extracted_total,
         "extractant_consumed": extractant_consumed,
         "h_produced": h_produced,
-        "sap_remaining": sap_remaining,
         "success": result.success,
         "consistency": consistency
     }
@@ -391,24 +392,12 @@ def solve_competitive_extraction(
 # ============================================================
 
 
-def make_parameter_range(center, minimum, maximum, points=60):
-    """Create logarithmic parameter range around center value"""
-    center = max(center, minimum)
-    center = min(center, maximum)
-
-    lower = max(minimum, center / 10.0)
-    upper = min(maximum, center * 10.0)
-
-    return np.geomspace(lower, upper, points)
-
-
 def calculate_sweep(
     parameter,
     values,
     feed,
     pH,
     extractant_total,
-    saponification,
     oa_ratio,
     kex_values,
     selected_metals,
@@ -422,17 +411,12 @@ def calculate_sweep(
 
         current_pH = pH
         current_extractant = extractant_total
-        current_saponification = saponification
         current_oa = oa_ratio
 
         if parameter == "pH":
             current_pH = value
         elif parameter == "Extractant":
             current_extractant = value
-        elif parameter == "Saponification":
-            # input values for saponification may be given as percent (0-100)
-            # convert to fraction in [0,1]
-            current_saponification = float(value) / 100.0
         elif parameter == "O/A":
             current_oa = value
 
@@ -440,7 +424,6 @@ def calculate_sweep(
             feed,
             10 ** (-current_pH),
             current_extractant,
-            current_saponification,
             current_oa,
             kex_values,
             metal_charges
@@ -504,10 +487,13 @@ st.caption(
 )
 
 st.info(
-    "✓ CORRECTED MODEL:\n"
-    "- Stoichiometry: M³⁺ + 3HA ↔ MA₃ + 3H⁺\n"
-    "- Saponification: removes extractant from free pool\n"
-    "- All metals compete for the same finite extractant pool"
+    "MODEL NOTES:\n"
+    "- Stoichiometry: M^z+ + z*HA <-> MA_z + z*H+\n"
+    "- Extractant and Kex are both on a consistent formal-monomer basis "
+    "(dimerization is absorbed into the apparent Kex, not modeled separately)\n"
+    "- All metals compete for the same finite extractant pool\n"
+    "- No pH buffering/base addition is modeled: pH is free to drift as "
+    "H+ is released by extraction"
 )
 
 
@@ -584,7 +570,7 @@ else:
 
 st.header("2. Extractant")
 
-col1, col2, col3 = st.columns(3)
+col1, col2 = st.columns(2)
 
 with col1:
     extractant_type = st.selectbox(
@@ -594,22 +580,11 @@ with col1:
 
 with col2:
     extractant_total = st.number_input(
-        "Total extractant concentration (mol/L, monomeric basis)",
+        "Total extractant concentration (mol/L, formal monomer basis)",
         min_value=0.000001,
         value=0.5,
         step=0.05
     )
-
-with col3:
-    saponification_percent = st.number_input(
-        "Saponification (%)",
-        min_value=0.0,
-        max_value=100.0,
-        value=40.0,
-        step=5.0
-    )
-
-saponification_fraction = saponification_percent / 100.0
 
 
 # ============================================================
@@ -639,17 +614,21 @@ with st.expander("View provisional Kex values and stoichiometry"):
         kex_table.append({
             "Metal": metal,
             "Charge (z)": charge,
-            "Stoichiometry": f"M^{charge}+ + {charge}HA → MA_{charge} + {charge}H+",
+            "Stoichiometry": f"M^{charge}+ + {charge}HA -> MA_{charge} + {charge}H+",
             "Kex": KEX_DATABASE[extractant_type][metal]
         })
 
     st.dataframe(kex_table, use_container_width=True, hide_index=True)
 
     st.caption(
-        "**Corrected Kex definition**: Kex = [MA_z]_org·[H+]^z / ([M^z+]_aq·[HA]_org^z)\n\n"
-        "The stoichiometry is M^z+ + z·HA ↔ MA_z + z·H+, where z is the metal charge.\n"
-        "Saponification removes extractant from the free pool, reducing extraction capacity.\n"
-        "ASSUMPTIONS: extractant provided in monomeric basis; extractant associates (dimer) in the organic phase but mass balances are done in monomeric units."
+        "**Kex definition**: Kex = [MA_z]_org * [H+]^z / ([M^z+]_aq * [HA]_org^z)\n\n"
+        "Stoichiometry: M^z+ + z*HA <-> MA_z + z*H+, where z is the metal charge.\n"
+        "ASSUMPTIONS: Kex and extractant concentration are both expressed on a "
+        "formal-monomer basis; the real dimerization of DEHPA/P507/Cyanex 272 in "
+        "the organic phase is not modeled separately, it is absorbed into the "
+        "apparent Kex. This is a provisional, illustrative database, not fitted "
+        "to a specific literature source, except that Cyanex 272's Co > Ni "
+        "ranking was set to match its well-documented Co/Ni selectivity."
     )
 
 
@@ -716,7 +695,6 @@ pH_results = calculate_sweep(
     feed,
     pH,
     extractant_total,
-    saponification_fraction,
     oa_ratio,
     kex_values,
     selected_metals,
@@ -732,8 +710,7 @@ st.pyplot(
         (
             f"Fixed: {extractant_type} | "
             f"Extractant = {extractant_total:.4g} M | "
-            f"O/A = {oa_ratio:.4g} | "
-            f"Saponification = {saponification_percent:.1f}%"
+            f"O/A = {oa_ratio:.4g}"
         )
     ),
     clear_figure=True
@@ -774,7 +751,6 @@ ao_results = calculate_sweep(
     feed,
     pH,
     extractant_total,
-    saponification_fraction,
     oa_ratio,
     kex_values,
     selected_metals,
@@ -790,8 +766,7 @@ st.pyplot(
         (
             f"Fixed: pH = {pH:.2f} | "
             f"{extractant_type} | "
-            f"Extractant = {extractant_total:.4g} M | "
-            f"Saponification = {saponification_percent:.1f}%"
+            f"Extractant = {extractant_total:.4g} M"
         )
     ),
     clear_figure=True
@@ -832,7 +807,6 @@ extractant_results = calculate_sweep(
     feed,
     pH,
     extractant_total,
-    saponification_fraction,
     oa_ratio,
     kex_values,
     selected_metals,
@@ -843,50 +817,11 @@ st.pyplot(
     plot_sweep(
         extractant_values,
         extractant_results,
-        "Extractant concentration (mol/L, monomeric basis)",
+        "Extractant concentration (mol/L, formal monomer basis)",
         "Extraction vs. extractant concentration",
         (
             f"Fixed: pH = {pH:.2f} | "
             f"{extractant_type} | "
-            f"O/A = {oa_ratio:.4g} | "
-            f"Saponification = {saponification_percent:.1f}%"
-        )
-    ),
-    clear_figure=True
-)
-
-
-# ============================================================
-# SAPONIFICATION GRAPH
-# ============================================================
-
-st.subheader("Extraction vs. saponification")
-
-sap_values = np.linspace(0, 100, 60)  # percent values passed; calculate_sweep converts to fraction
-
-sap_results = calculate_sweep(
-    "Saponification",
-    sap_values,
-    feed,
-    pH,
-    extractant_total,
-    saponification_fraction,
-    oa_ratio,
-    kex_values,
-    selected_metals,
-    metal_charges
-)
-
-st.pyplot(
-    plot_sweep(
-        sap_values,
-        sap_results,
-        "Saponification (%)",
-        "Extraction vs. saponification",
-        (
-            f"Fixed: pH = {pH:.2f} | "
-            f"{extractant_type} | "
-            f"Extractant = {extractant_total:.4g} M | "
             f"O/A = {oa_ratio:.4g}"
         )
     ),
@@ -904,11 +839,17 @@ base_result = solve_competitive_extraction(
     feed,
     10 ** (-pH),
     extractant_total,
-    saponification_fraction,
     oa_ratio,
     kex_values,
     metal_charges
 )
+
+if not base_result["success"]:
+    st.warning(
+        "The equilibrium solver did not converge for these operating "
+        "conditions. Results below may be inaccurate -- try adjusting "
+        "pH, extractant concentration, or O/A ratio."
+    )
 
 summary = []
 
@@ -956,7 +897,7 @@ with col4:
     )
 
 st.caption(
-    "**Note**: Extractant consumption = Σ(z_i × c_org,i) where z_i is the metal charge.\n"
-    "Saponification removes an additional "
-    f"{saponification_fraction * extractant_total:.6f} mol/L from the free pool."
+    "**Note**: Extractant consumption = Sum(z_i * c_org,i) where z_i is the metal charge. "
+    "Equilibrium pH shown above is the SOLVED value (it will differ from the input "
+    "operating pH because no buffering/base addition is modeled)."
 )
