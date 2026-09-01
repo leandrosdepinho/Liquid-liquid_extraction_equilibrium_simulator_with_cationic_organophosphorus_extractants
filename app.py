@@ -9,7 +9,7 @@ from scipy.optimize import least_squares
 # ============================================================
 
 st.set_page_config(
-    page_title="Competitive Solvent Extraction Simulator",
+    page_title="Solvent extraction equilibrium simulator with cationic organophosphorus extractants",
     page_icon="🧪",
     layout="wide"
 )
