@@ -584,18 +584,6 @@ with st.expander("View provisional Kex values and stoichiometry"):
 
     st.dataframe(kex_table, use_container_width=True, hide_index=True)
 
-    st.caption(
-        "**Kex definition**: Kex = [MA_z]_org * [H+]^z / ([M^z+]_aq * [HA]_org^z)\n\n"
-        "Stoichiometry: M^z+ + z*HA <-> MA_z + z*H+, where z is the metal charge.\n"
-        "ASSUMPTIONS: Kex and extractant concentration are both expressed on a "
-        "formal-monomer basis; the real dimerization of DEHPA/P507/Cyanex 272 in "
-        "the organic phase is not modeled separately, it is absorbed into the "
-        "apparent Kex. This is a provisional, illustrative database, not fitted "
-        "to a specific literature source, except that Cyanex 272's Co > Ni "
-        "ranking was set to match its well-documented Co/Ni selectivity."
-    )
-
-
 # ============================================================
 # KEX ARRAY AND METAL CHARGES
 # ============================================================
