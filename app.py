@@ -66,31 +66,6 @@ MOLAR_MASS = {
     "Al": 26.98154
 }
 
-
-# ============================================================
-# PROVISIONAL Kex DATABASE
-# Note: Kex values are apparent/conditional constants reported on a
-# formal-monomer basis for the reaction M^z+ + z*HA <-> MA_z + z*H+
-# (see solve_competitive_extraction docstring for why this convention
-# was chosen). These are illustrative/provisional numbers, NOT fitted
-# to a specific literature dataset -- they are meant for screening-tool
-# demonstration only.
-#
-# CORRECTION (chemistry error fixed here): for Cyanex 272, Co was
-# previously given a LOWER Kex than Ni (Co=2.5e-3 < Ni=4.0e-3). This
-# contradicts one of the best-documented facts in hydrometallurgy:
-# Cyanex 272 is industrially used specifically because it extracts
-# Co(II) far more readily than Ni(II) (this Co/Ni selectivity is the
-# entire reason the reagent was developed and is used in Co/Ni
-# separation flowsheets). The Co value below was raised so that
-# Co >> Ni for Cyanex 272, consistent with that fact. This is still a
-# provisional illustrative number (the real separation factor is
-# typically much larger and pH-dependent), but the ranking is now
-# chemically correct. DEHPA/P507 were left with Co ~ Ni, which is
-# consistent with their well-known POOR Co/Ni selectivity (the reason
-# Cyanex 272 exists in the first place).
-# ============================================================
-
 KEX_DATABASE = {
 
     "DEHPA": {
@@ -884,9 +859,3 @@ with col4:
         "Extractant Used (mol/L)",
         f"{base_result['extractant_consumed']:.6f}"
     )
-
-st.caption(
-    "**Note**: Extractant consumption = Sum(z_i * c_org,i) where z_i is the metal charge. "
-    "Equilibrium pH shown above is the SOLVED value (it will differ from the input "
-    "operating pH because no buffering/base addition is modeled)."
-)
