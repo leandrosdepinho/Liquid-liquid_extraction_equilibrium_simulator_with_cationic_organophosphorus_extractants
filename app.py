@@ -486,17 +486,6 @@ st.caption(
     "acidic organophosphorus extractants."
 )
 
-st.info(
-    "MODEL NOTES:\n"
-    "- Stoichiometry: M^z+ + z*HA <-> MA_z + z*H+\n"
-    "- Extractant and Kex are both on a consistent formal-monomer basis "
-    "(dimerization is absorbed into the apparent Kex, not modeled separately)\n"
-    "- All metals compete for the same finite extractant pool\n"
-    "- No pH buffering/base addition is modeled: pH is free to drift as "
-    "H+ is released by extraction"
-)
-
-
 # ============================================================
 # BASIC INPUTS
 # ============================================================
