@@ -22,18 +22,14 @@ st.set_page_config(
 METALS = [
     "La", "Ce", "Pr", "Nd", "Sm",
     "Eu", "Gd", "Tb", "Dy", "Ho",
-    "Y", "Er", "Tm", "Yb", "Lu",
-    "Fe", "Co", "Ni", "Cu", "Zn",
-    "Mn", "Ca", "Mg", "Al"
+    "Y", "Er", "Tm", "Yb", "Lu"
 ]
 
 # Metal charges (valence): for rare earths and common metals in extraction
 METAL_CHARGE = {
     "La": 3, "Ce": 3, "Pr": 3, "Nd": 3, "Sm": 3,
     "Eu": 3, "Gd": 3, "Tb": 3, "Dy": 3, "Ho": 3,
-    "Y": 3, "Er": 3, "Tm": 3, "Yb": 3, "Lu": 3,
-    "Fe": 3, "Co": 2, "Ni": 2, "Cu": 2, "Zn": 2,
-    "Mn": 2, "Ca": 2, "Mg": 2, "Al": 3
+    "Y": 3, "Er": 3, "Tm": 3, "Yb": 3, "Lu": 3
 }
 
 
@@ -54,16 +50,6 @@ MOLAR_MASS = {
     "Tm": 168.93422,
     "Yb": 173.045,
     "Lu": 174.9668,
-
-    "Fe": 55.845,
-    "Co": 58.933,
-    "Ni": 58.6934,
-    "Cu": 63.546,
-    "Zn": 65.38,
-    "Mn": 54.93804,
-    "Ca": 40.078,
-    "Mg": 24.305,
-    "Al": 26.98154
 }
 
 KEX_DATABASE = {
@@ -85,16 +71,6 @@ KEX_DATABASE = {
         "Tm": 2.5e-1,
         "Yb": 3.5e-1,
         "Lu": 5.0e-1,
-
-        "Fe": 2.0e-1,
-        "Co": 2.0e-3,
-        "Ni": 3.0e-3,
-        "Cu": 5.0e-2,
-        "Zn": 1.0e-2,
-        "Mn": 2.0e-3,
-        "Ca": 5.0e-4,
-        "Mg": 2.0e-4,
-        "Al": 5.0e-2
     },
 
     "P507": {
@@ -114,16 +90,6 @@ KEX_DATABASE = {
         "Tm": 2.2e-1,
         "Yb": 3.0e-1,
         "Lu": 4.3e-1,
-
-        "Fe": 1.5e-1,
-        "Co": 1.5e-3,
-        "Ni": 2.5e-3,
-        "Cu": 4.0e-2,
-        "Zn": 8.0e-3,
-        "Mn": 1.5e-3,
-        "Ca": 4.0e-4,
-        "Mg": 1.5e-4,
-        "Al": 4.0e-2
     },
 
     "Cyanex 272": {
@@ -143,16 +109,6 @@ KEX_DATABASE = {
         "Tm": 3.2e-1,
         "Yb": 4.5e-1,
         "Lu": 6.5e-1,
-
-        "Fe": 2.5e-1,
-        "Co": 1.0e-1,   # CORRIGIDO: era 2.5e-3 (Co < Ni), agora Co >> Ni
-        "Ni": 4.0e-3,   # mantido
-        "Cu": 7.0e-2,
-        "Zn": 1.5e-2,
-        "Mn": 2.5e-3,
-        "Ca": 7.0e-4,
-        "Mg": 3.0e-4,
-        "Al": 7.0e-2
     }
 }
 
@@ -439,7 +395,7 @@ st.subheader("Select metals")
 selected_metals = st.multiselect(
     "Metals present in the aqueous solution",
     METALS,
-    default=["Nd", "Sm", "Fe"]
+    default=["Nd", "Sm"]
 )
 
 feed = np.zeros(len(METALS))
