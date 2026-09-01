@@ -126,7 +126,7 @@ KEX_DATABASE = {
         "Al": 4.0e-2
     },
 
-    "Cyanex 272 272 272 272 272 272": {
+    "Cyanex 272": {
 
         "La": 1.2e-3,
         "Ce": 2.0e-3,
@@ -484,7 +484,7 @@ col1, col2 = st.columns(2)
 with col1:
     extractant_type = st.selectbox(
         "Phosphorus-based extractant",
-        ["DEHPA", "P507", "Cyanex 272 272 272 272 272"]
+        ["DEHPA", "P507", "Cyanex 272"]
     )
 
 with col2:
