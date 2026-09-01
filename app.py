@@ -187,53 +187,6 @@ def solve_competitive_extraction(
     kex_values,
     metal_charges
 ):
-    """
-    Solve single-stage multicomponent equilibrium extraction.
-
-    MODEL ASSUMPTIONS / IMPLEMENTATION NOTES
-    - Stoichiometry: M^z+ + z*HA <-> MA_z + z*H+
-    - Monomer/dimer convention (FIXED): DEHPA, P507 and Cyanex 272 all
-      dimerize in non-polar diluents in reality. Rather than modeling a
-      separate dimerization equilibrium (which would require a Kdim not
-      normally available for a pre-experimental screening tool), this
-      model follows the standard practical convention used when Kex is
-      reported/fitted as an apparent constant on a FORMAL MONOMER basis:
-      'extractant_total' and 'kex_values' are BOTH expressed per mole of
-      monomeric HA, consistently, everywhere in this function. The
-      previous version of this code carried an unused 'aggregation'
-      parameter that implied dimer/monomer bookkeeping was happening
-      when it was not -- that parameter has been removed to avoid this
-      false impression. There is exactly one convention in force now
-      (formal monomer basis), and it is used consistently in the
-      extractant mass balance, the Kex expression, and the UI labels.
-    - Saponification has been intentionally removed from this model
-      (previously represented as extractant permanently withdrawn from
-      the free pool). Modeling neutralized extractant correctly would
-      require tracking Na+/NH4+ for the neutralized fraction instead of
-      H+, which this single-stage H+-only mass balance does not attempt.
-    - Activities, ionic strength, temperature and metal hydrolysis are
-      neglected (by design, for a pre-experimental screening tool).
-
-    Parameters
-    ----------
-    feed : array
-        Initial metal concentrations (mol/L, aqueous)
-    h_initial : float
-        Initial H+ concentration (mol/L, aqueous)
-    extractant_total : float
-        Total extractant concentration (mol/L, formal monomer basis, per L_org)
-    oa_ratio : float
-        Organic to aqueous phase ratio (V_org / V_aq)
-    kex_values : array
-        Kex for each metal (basis: M^z+ + z*HA <-> MA_z + z*H+, formal monomer)
-    metal_charges : array
-        Charge of each metal (z value)
-
-    Returns
-    -------
-    dict
-        Equilibrium concentrations and extraction %
-    """
 
     feed = np.asarray(feed, dtype=float)
     kex_values = np.asarray(kex_values, dtype=float)
@@ -247,14 +200,6 @@ def solve_competitive_extraction(
     e_guess = max(extractant_total * 0.5, 1e-12)
 
     def residual(log_variables):
-        """
-        Residual equations for equilibrium:
-        1. Extractant balance: e_free = extractant_total - extracted
-        2. H+ balance: h = h_initial + h_produced
-        All metal concentrations are on a per-L_aq basis unless noted.
-        Extractant concentrations are on a per-L_org, formal-monomer basis;
-        conversions between the two bases are done explicitly where needed.
-        """
 
         h = np.exp(log_variables[0])
         e_free = np.exp(log_variables[1])  # formal monomer basis (mol HA / L_org)
